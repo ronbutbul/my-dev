@@ -1,0 +1,24 @@
+tic-tac-toe/
+│
+├── frontend/                  # React application
+│
+├── gateway-service/            # Python WebSocket gateway
+│   ├── app.py
+│   ├── requirements.txt
+│   └── venv/
+│
+├── game-logic-service/         # Python game logic
+│   ├── game.py
+│   ├── requirements.txt
+│   └── venv/
+│
+├── broadcaster-service/        # Python broadcaster
+│   ├── ws.py
+│   ├── requirements.txt
+│   └── venv/
+│
+├── k8s/                        # K3s manifests
+│   ├── kafka.yaml
+│   ├── gateway.yaml
+│   ├── game-logic.yaml
+│   └

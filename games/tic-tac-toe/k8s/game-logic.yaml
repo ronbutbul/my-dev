@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: game-logic-service
+spec:
+  selector:
+    app: game-logic-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-logic-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: game-logic-service
+  template:
+    metadata:
+      labels:
+        app: game-logic-service
+    spec:
+      containers:
+        - name: game-logic
+          image: your-registry/game-logic-service:latest
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: KAFKA_MOVES_TOPIC
+              value: game-moves
+            - name: KAFKA_STATE_TOPIC
+              value: game-state-updates
+          command: ["python", "-m", "service"]
+
+
