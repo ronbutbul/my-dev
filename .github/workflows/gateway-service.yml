@@ -4,19 +4,12 @@ on:
   push:
     branches:
       - main
-      - develop
-    paths:
-      - 'gateway-service/**'
-  pull_request:
-    branches:
-      - main
-      - develop
     paths:
       - 'gateway-service/**'
 
 env:
   SERVICE_NAME: gateway-service
-  DOCKER_IMAGE: ${{ secrets.DOCKER_REGISTRY }}/tic-tac-toe-gateway
+  DOCKER_IMAGE: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/tic-tac-toe-gateway
   HELM_CHART_REPO: ${{ secrets.HELM_CHART_REPO }}
   HELM_CHART_PATH: gateway-service
 
@@ -75,7 +68,6 @@ jobs:
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
-            ${{ env.DOCKER_IMAGE }}:latest
           cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
 
