@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'archive-service/**'
+      - 'games/tic-tac-toe/archive-service/**'
 
 
 env:
