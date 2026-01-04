@@ -4,11 +4,12 @@ on:
   push:
     branches:
       - main
-
+    paths:
+      - 'archive-service/**'
 
 env:
   SERVICE_NAME: archive-service
-  DOCKER_IMAGE: ${{ secrets.DOCKER_REGISTRY }}/tic-tac-toe-archive
+  DOCKER_IMAGE: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/tic-tac-toe-archive
   HELM_CHART_REPO: ${{ secrets.HELM_CHART_REPO }}
   HELM_CHART_PATH: archive-service
 
