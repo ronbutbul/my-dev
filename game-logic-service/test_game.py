@@ -48,7 +48,8 @@ class TicTacToeGameTests(unittest.TestCase):
             self.game.handle_move(player_id="player2", row=2, col=2)
 
     def test_draw(self) -> None:
-        # Play out a draw scenario
+        # Play out a draw scenario (board full, no winner)
+        # Final board: X O X / O O X / X X O
         moves = [
             ("player1", 0, 0),  # X
             ("player2", 0, 1),  # O
@@ -56,9 +57,9 @@ class TicTacToeGameTests(unittest.TestCase):
             ("player2", 1, 0),  # O
             ("player1", 1, 2),  # X
             ("player2", 1, 1),  # O
+            ("player1", 2, 0),  # X
+            ("player2", 2, 2),  # O
             ("player1", 2, 1),  # X
-            ("player2", 2, 0),  # O
-            ("player1", 2, 2),  # X
         ]
 
         for player_id, row, col in moves:
@@ -69,9 +70,10 @@ class TicTacToeGameTests(unittest.TestCase):
 
     def test_state_to_dict_matches_readme_shape(self) -> None:
         state_dict = self.game.state.to_dict()
-        self.assertIn("game_id", state_dict)
+        # to_dict() returns camelCase keys to match README format
+        self.assertIn("gameId", state_dict)
         self.assertIn("status", state_dict)
-        self.assertIn("current_turn", state_dict)
+        self.assertIn("currentTurn", state_dict)
         self.assertIn("board", state_dict)
         self.assertIn("players", state_dict)
 
