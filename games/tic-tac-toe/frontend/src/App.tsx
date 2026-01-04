@@ -25,8 +25,14 @@ export const App: React.FC = () => {
   const [wsStatus, setWsStatus] = useState<string>("Disconnected");
 
   useEffect(() => {
-    // Connect to Gateway Service on port 9000
-    const url = `ws://${window.location.hostname}:9000`;
+    // Connect to Gateway Service - use config from window.__APP_CONFIG__ or fallback
+    // The config is loaded from /config.js which is generated at runtime from ConfigMap
+    const config = (window as any).__APP_CONFIG__ || {};
+    const defaultPort = 9000; // Default port, but should come from config
+    const wsUrl = config.gatewayWsUrl || `ws://${window.location.hostname}:${defaultPort}`;
+    const url = wsUrl.startsWith('ws://') || wsUrl.startsWith('wss://') 
+      ? wsUrl 
+      : `ws://${wsUrl}`;
 
     console.log("Connecting to WebSocket:", url);
     const ws = new WebSocket(url);
