@@ -136,7 +136,13 @@ class Gateway:
         host = get_str("GATEWAY_HOST", "0.0.0.0") or "0.0.0.0"
         port = int(get_str("GATEWAY_PORT", "8080") or "8080")
 
-        server = await websockets.serve(self._handle_client, host, port)
+        # Allow all origins for CORS (set origins=None to accept any origin)
+        server = await websockets.serve(
+            self._handle_client,
+            host,
+            port,
+            origins=None  # Allow all origins (CORS *)
+        )
         logger.info("Gateway WebSocket server listening on %s:%s", host, port)
 
         # Start Kafka consumer in background thread

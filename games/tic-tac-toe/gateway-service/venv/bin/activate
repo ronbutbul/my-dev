@@ -38,7 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV=/home/ronbut/games/tic-tac-toe/gateway-service/venv
+VIRTUAL_ENV=/home/ronbut/games/git/my-dev/games/tic-tac-toe/gateway-service/venv
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"
