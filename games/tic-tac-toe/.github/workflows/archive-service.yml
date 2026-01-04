@@ -3,7 +3,7 @@ name: Build and Deploy Archive Service
 on:
   push:
     branches:
-      - dev
+      - main
     paths:
       - 'archive-service/**'
 
