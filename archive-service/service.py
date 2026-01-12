@@ -31,7 +31,7 @@ def _create_consumer() -> KafkaConsumer:
         value_deserializer=lambda m: json.loads(m.decode("utf-8")),
         enable_auto_commit=True,
         auto_offset_reset="earliest",
-        group_id=get_str("KAFKA_CONSUMER_GROUP", "archive-service"),
+        group_id=get_str("ARCHIVE_CONSUMER_GROUP", "archive-service"),
     )
     logger.info("Archive Service consuming state updates from topic %s", topic)
     return consumer
