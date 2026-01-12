@@ -21,11 +21,14 @@ RUN npm run build
 # Production stage
 FROM nginx:alpine
 
-# Copy built files from builder
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copy built bundle.js from builder
+COPY --from=builder /app/dist/bundle.js /usr/share/nginx/html/bundle.js
 
 # Copy index.html from public directory
 COPY --from=builder /app/public/index.html /usr/share/nginx/html/index.html
+
+# List files for debugging
+RUN ls -la /usr/share/nginx/html/
 
 # Set proper permissions
 RUN chmod -R 755 /usr/share/nginx/html && \
