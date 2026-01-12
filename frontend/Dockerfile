@@ -24,6 +24,13 @@ FROM nginx:alpine
 # Copy built files from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+# Copy index.html from public directory
+COPY --from=builder /app/public/index.html /usr/share/nginx/html/index.html
+
+# Set proper permissions
+RUN chmod -R 755 /usr/share/nginx/html && \
+    chown -R nginx:nginx /usr/share/nginx/html
+
 # Copy nginx configuration (optional, for SPA routing)
 RUN echo 'server { \
     listen 80; \
