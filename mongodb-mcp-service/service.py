@@ -128,6 +128,15 @@ async def mcp_endpoint(
     if method == "initialize":
         return await handle_initialize(request_id, params)
 
+    # Handle notifications/initialized (notification, no response needed)
+    # Notifications don't have an id, so we handle them before session checks
+    if method == "notifications/initialized":
+        # This is a notification (no id), so we just acknowledge it silently
+        # According to JSON-RPC 2.0, notifications don't require a response
+        # But HTTP requires a response, so we return 200 OK with empty body
+        logger.info("Received initialized notification")
+        return Response(status_code=200)
+
     # All other methods require a session
     if not mcp_session_id:
         return JSONResponse(
