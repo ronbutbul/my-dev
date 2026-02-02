@@ -17,6 +17,7 @@ services:
       - kafka-net
     ports:
       - "9092:9092"
+      - "9093:9093"
     environment:
       # KRaft (no ZooKeeper)
       KAFKA_ENABLE_KRAFT: "yes"
