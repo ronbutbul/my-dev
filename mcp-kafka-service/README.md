@@ -1,4 +1,4 @@
-# Kafka MCP Server
+# Kafka MCP Server original
 
 A Multi-Cluster Proxy (MCP) server for Kafka operations, implementing the JSON-RPC 2.0 protocol for use with kagent.
 
