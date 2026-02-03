@@ -908,10 +908,24 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """
+    Health check endpoint.
+
+    Uses a lightweight KafkaConsumer against KAFKA_BOOTSTRAP_SERVERS instead of the
+    admin client to avoid protocol/version issues (e.g. MetadataRequest_v0).
+    """
     try:
-        test_client = _create_kafka_admin_client()
-        test_client.close()
+        bootstrap_servers = get_str("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+        logger.info("Health check: connecting KafkaConsumer to %s", bootstrap_servers)
+
+        consumer = KafkaConsumer(
+            bootstrap_servers=bootstrap_servers.split(","),
+            consumer_timeout_ms=1000,
+        )
+        # Trigger metadata fetch
+        consumer.poll(timeout_ms=1000)
+        consumer.close()
+
         return JSONResponse(content={"status": "healthy"})
     except Exception as e:
         logger.error(f"Health check failed: {e}")
