@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -26,6 +25,14 @@ sessions: Dict[str, Dict[str, Any]] = {}
 
 # Elasticsearch client cache per session
 es_clients: Dict[str, Elasticsearch] = {}
+
+
+def _es_to_jsonable(resp: Any) -> Any:
+    """
+    elasticsearch-py 8.x returns ObjectApiResponse which is NOT JSON serializable.
+    The actual JSON payload is in resp.body.
+    """
+    return resp.body if hasattr(resp, "body") else resp
 
 
 def _create_es_client() -> Elasticsearch:
@@ -78,7 +85,7 @@ async def mcp_endpoint(
     mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
 ):
     """Main MCP endpoint handling JSON-RPC 2.0 requests."""
-    body = None
+    body: Optional[Dict[str, Any]] = None
     try:
         body = await request.json()
     except Exception as e:
@@ -191,6 +198,22 @@ async def handle_tools_list(request_id: Any) -> JSONResponse:
                         "type": "integer",
                         "description": "Number of hits to return (optional)",
                     },
+                    "sort": {
+                        "type": "array",
+                        "description": "Sort specification, e.g. [{\"@timestamp\": {\"order\": \"desc\"}}]",
+                        "items": {"type": "object"},
+                    },
+                    "source": {
+                        "description": (
+                            "Source filtering configuration. Either an array of field names to include "
+                            "or an object with includes/excludes, e.g. [\"field1\",\"field2\"] or "
+                            "{\"includes\":[\"field1\"],\"excludes\":[\"field2\"]}."
+                        ),
+                        "anyOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "object"},
+                        ],
+                    },
                 },
                 "required": ["index"],
             },
@@ -279,9 +302,7 @@ async def handle_tools_list(request_id: Any) -> JSONResponse:
             "description": "Get mappings for an index",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "index": {"type": "string", "description": "Index name"},
-                },
+                "properties": {"index": {"type": "string", "description": "Index name"}},
                 "required": ["index"],
             },
         },
@@ -290,9 +311,7 @@ async def handle_tools_list(request_id: Any) -> JSONResponse:
             "description": "Get statistics for an index",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "index": {"type": "string", "description": "Index name"},
-                },
+                "properties": {"index": {"type": "string", "description": "Index name"}},
                 "required": ["index"],
             },
         },
@@ -315,7 +334,7 @@ async def handle_tools_list(request_id: Any) -> JSONResponse:
                     "connectionString": {
                         "type": "string",
                         "description": "New Elasticsearch URL, e.g., http://localhost:9200",
-                    },
+                    }
                 },
                 "required": ["connectionString"],
             },
@@ -323,11 +342,7 @@ async def handle_tools_list(request_id: Any) -> JSONResponse:
     ]
 
     return JSONResponse(
-        content={
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {"tools": tools},
-        }
+        content={"jsonrpc": "2.0", "id": request_id, "result": {"tools": tools}}
     )
 
 
@@ -351,11 +366,12 @@ async def handle_tools_call(
     try:
         client = _get_es_client(session_id)
         result = await execute_tool(tool_name, arguments, client, session_id)
+        # IMPORTANT: return JSON object, not a string
         return JSONResponse(
             content={
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {"content": [{"type": "text", "text": result}]},
+                "result": {"content": [{"type": "json", "json": result}]},
             }
         )
     except HTTPException:
@@ -374,40 +390,47 @@ async def handle_tools_call(
 
 async def execute_tool(
     tool_name: str, arguments: Dict[str, Any], client: Elasticsearch, session_id: str
-) -> str:
-    """Execute an Elasticsearch tool operation."""
+) -> Dict[str, Any]:
+    """Execute an Elasticsearch tool operation. Always return JSON-serializable dicts."""
     try:
         if tool_name == "search":
             index = arguments["index"]
             query = arguments.get("query", {"match_all": {}})
             from_ = arguments.get("from")
             size = arguments.get("size")
+            sort = arguments.get("sort")
+            source = arguments.get("source")
 
-            search_args: Dict[str, Any] = {"index": index, "body": {"query": query}}
+            body: Dict[str, Any] = {"query": query}
+            if sort is not None:
+                body["sort"] = sort
+            if source is not None:
+                # Map our 'source' arg to ES _source filtering
+                body["_source"] = source
+
+            search_args: Dict[str, Any] = {"index": index, "body": body}
             if from_ is not None:
                 search_args["from_"] = from_
             if size is not None:
                 search_args["size"] = size
 
             resp = client.search(**search_args)
-            return json.dumps(resp, default=str, indent=2)
+            return _es_to_jsonable(resp)
 
         elif tool_name == "count":
             index = arguments["index"]
             query = arguments.get("query", {"match_all": {}})
             resp = client.count(index=index, body={"query": query})
-            return json.dumps(resp, default=str, indent=2)
+            return _es_to_jsonable(resp)
 
         elif tool_name == "get-document":
             index = arguments["index"]
             doc_id = arguments["id"]
             try:
                 resp = client.get(index=index, id=doc_id)
-                return json.dumps(resp, default=str, indent=2)
+                return _es_to_jsonable(resp)
             except NotFoundError:
-                return json.dumps(
-                    {"found": False, "message": "Document not found"}, indent=2
-                )
+                return {"found": False, "message": "Document not found", "_index": index, "_id": doc_id}
 
         elif tool_name == "index-document":
             index = arguments["index"]
@@ -417,65 +440,62 @@ async def execute_tool(
                 resp = client.index(index=index, id=doc_id, document=document)
             else:
                 resp = client.index(index=index, document=document)
-            return json.dumps(resp, default=str, indent=2)
+            return _es_to_jsonable(resp)
 
         elif tool_name == "delete-document":
             index = arguments["index"]
             doc_id = arguments["id"]
             try:
                 resp = client.delete(index=index, id=doc_id)
-                return json.dumps(resp, default=str, indent=2)
+                return _es_to_jsonable(resp)
             except NotFoundError:
-                return json.dumps(
-                    {"found": False, "message": "Document not found"}, indent=2
-                )
+                return {"found": False, "message": "Document not found", "_index": index, "_id": doc_id}
 
         elif tool_name == "update-document":
             index = arguments["index"]
             doc_id = arguments["id"]
             doc = arguments["doc"]
-            body = {"doc": doc}
-            resp = client.update(index=index, id=doc_id, body=body)
-            return json.dumps(resp, default=str, indent=2)
+            resp = client.update(index=index, id=doc_id, body={"doc": doc})
+            return _es_to_jsonable(resp)
 
         elif tool_name == "list-indices":
             resp = client.indices.get_alias(index="*")
-            indices = sorted(resp.keys())
-            return json.dumps({"indices": indices}, indent=2)
+            data = _es_to_jsonable(resp)
+            indices = sorted(data.keys()) if isinstance(data, dict) else []
+            return {"indices": indices}
 
         elif tool_name == "index-mappings":
             index = arguments["index"]
             resp = client.indices.get_mapping(index=index)
-            return json.dumps(resp, default=str, indent=2)
+            return _es_to_jsonable(resp)
 
         elif tool_name == "index-stats":
             index = arguments["index"]
             resp = client.indices.stats(index=index)
-            return json.dumps(resp, default=str, indent=2)
+            return _es_to_jsonable(resp)
 
         elif tool_name == "cluster-health":
             resp = client.cluster.health()
-            return json.dumps(resp, default=str, indent=2)
+            return _es_to_jsonable(resp)
 
         elif tool_name == "cluster-stats":
             resp = client.cluster.stats()
-            return json.dumps(resp, default=str, indent=2)
+            return _es_to_jsonable(resp)
 
         elif tool_name == "switch-connection":
             connection_string = arguments["connectionString"]
             # Close old client and create new one
             if session_id in es_clients:
-                es_clients[session_id].close()
+                try:
+                    es_clients[session_id].close()
+                except Exception:
+                    pass
             try:
                 new_client = Elasticsearch(hosts=[connection_string])
                 new_client.info()
                 es_clients[session_id] = new_client
-                logger.info(
-                    f"Switched Elasticsearch connection for session {session_id}"
-                )
-                return json.dumps(
-                    {"message": "Switched connection successfully"}, indent=2
-                )
+                logger.info(f"Switched Elasticsearch connection for session {session_id}")
+                return {"message": "Switched connection successfully", "connectionString": connection_string}
             except Exception as e:
                 logger.error(f"Failed to switch Elasticsearch connection: {e}")
                 raise HTTPException(
@@ -488,6 +508,8 @@ async def execute_tool(
 
     except KeyError as e:
         raise HTTPException(status_code=400, detail=f"Missing required argument: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in execute_tool: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Tool execution error: {str(e)}")
@@ -499,6 +521,8 @@ class SearchRequest(BaseModel):
     query: Optional[Dict[str, Any]] = None
     from_: Optional[int] = None
     size: Optional[int] = None
+    sort: Optional[List[Dict[str, Any]]] = None
+    source: Optional[Any] = None
 
 
 class CountRequest(BaseModel):
@@ -552,17 +576,20 @@ async def search_route(request: SearchRequest):
     """Run a search query against an Elasticsearch index."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    args: Dict[str, Any] = {
-        "index": request.index,
-    }
+    args: Dict[str, Any] = {"index": request.index}
     if request.query is not None:
         args["query"] = request.query
     if request.from_ is not None:
         args["from"] = request.from_
     if request.size is not None:
         args["size"] = request.size
+    if request.sort is not None:
+        args["sort"] = request.sort
+    if request.source is not None:
+        args["source"] = request.source
+
     result = await execute_tool("search", args, client, session_id)
-    return JSONResponse(content=json.loads(result))
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/count", tags=["Elasticsearch Tools"])
@@ -570,16 +597,8 @@ async def count_route(request: CountRequest):
     """Return the number of documents matching a query in an index."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    result = await execute_tool(
-        "count",
-        {
-            "index": request.index,
-            "query": request.query,
-        },
-        client,
-        session_id,
-    )
-    return JSONResponse(content=json.loads(result))
+    result = await execute_tool("count", {"index": request.index, "query": request.query}, client, session_id)
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/get-document", tags=["Elasticsearch Tools"])
@@ -587,16 +606,8 @@ async def get_document_route(request: GetDocumentRequest):
     """Get a single document by ID."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    result = await execute_tool(
-        "get-document",
-        {
-            "index": request.index,
-            "id": request.id,
-        },
-        client,
-        session_id,
-    )
-    return JSONResponse(content=json.loads(result))
+    result = await execute_tool("get-document", {"index": request.index, "id": request.id}, client, session_id)
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/index-document", tags=["Elasticsearch Tools"])
@@ -604,19 +615,11 @@ async def index_document_route(request: IndexDocumentRequest):
     """Index (create or replace) a single document."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    args: Dict[str, Any] = {
-        "index": request.index,
-        "document": request.document,
-    }
+    args: Dict[str, Any] = {"index": request.index, "document": request.document}
     if request.id is not None:
         args["id"] = request.id
-    result = await execute_tool(
-        "index-document",
-        args,
-        client,
-        session_id,
-    )
-    return JSONResponse(content=json.loads(result))
+    result = await execute_tool("index-document", args, client, session_id)
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/delete-document", tags=["Elasticsearch Tools"])
@@ -624,16 +627,8 @@ async def delete_document_route(request: DeleteDocumentRequest):
     """Delete a single document by ID."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    result = await execute_tool(
-        "delete-document",
-        {
-            "index": request.index,
-            "id": request.id,
-        },
-        client,
-        session_id,
-    )
-    return JSONResponse(content=json.loads(result))
+    result = await execute_tool("delete-document", {"index": request.index, "id": request.id}, client, session_id)
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/update-document", tags=["Elasticsearch Tools"])
@@ -643,15 +638,11 @@ async def update_document_route(request: UpdateDocumentRequest):
     client = _get_es_client(session_id)
     result = await execute_tool(
         "update-document",
-        {
-            "index": request.index,
-            "id": request.id,
-            "doc": request.doc,
-        },
+        {"index": request.index, "id": request.id, "doc": request.doc},
         client,
         session_id,
     )
-    return JSONResponse(content=json.loads(result))
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/list-indices", tags=["Elasticsearch Tools"])
@@ -660,7 +651,7 @@ async def list_indices_route():
     session_id = _get_default_session()
     client = _get_es_client(session_id)
     result = await execute_tool("list-indices", {}, client, session_id)
-    return JSONResponse(content=json.loads(result))
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/index-mappings", tags=["Elasticsearch Tools"])
@@ -668,13 +659,8 @@ async def index_mappings_route(request: IndexOnlyRequest):
     """Get mappings for an index."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    result = await execute_tool(
-        "index-mappings",
-        {"index": request.index},
-        client,
-        session_id,
-    )
-    return JSONResponse(content=json.loads(result))
+    result = await execute_tool("index-mappings", {"index": request.index}, client, session_id)
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/index-stats", tags=["Elasticsearch Tools"])
@@ -682,13 +668,8 @@ async def index_stats_route(request: IndexOnlyRequest):
     """Get statistics for an index."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    result = await execute_tool(
-        "index-stats",
-        {"index": request.index},
-        client,
-        session_id,
-    )
-    return JSONResponse(content=json.loads(result))
+    result = await execute_tool("index-stats", {"index": request.index}, client, session_id)
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/cluster-health", tags=["Elasticsearch Tools"])
@@ -697,7 +678,7 @@ async def cluster_health_route():
     session_id = _get_default_session()
     client = _get_es_client(session_id)
     result = await execute_tool("cluster-health", {}, client, session_id)
-    return JSONResponse(content=json.loads(result))
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/cluster-stats", tags=["Elasticsearch Tools"])
@@ -706,22 +687,16 @@ async def cluster_stats_route():
     session_id = _get_default_session()
     client = _get_es_client(session_id)
     result = await execute_tool("cluster-stats", {}, client, session_id)
-    return JSONResponse(content=json.loads(result))
+    return JSONResponse(content=result)
 
 
 @app.post("/tools/switch-connection", tags=["Elasticsearch Tools"])
 async def switch_connection_route(request: SwitchConnectionRequest):
     """Switch to a different Elasticsearch connection."""
     session_id = _get_default_session()
-    # For switch-connection, we get a dummy client first, then the tool will replace it
     client = _get_es_client(session_id)
-    result = await execute_tool(
-        "switch-connection",
-        {"connectionString": request.connectionString},
-        client,
-        session_id,
-    )
-    return JSONResponse(content=json.loads(result))
+    result = await execute_tool("switch-connection", {"connectionString": request.connectionString}, client, session_id)
+    return JSONResponse(content=result)
 
 
 @app.get("/")
@@ -743,14 +718,11 @@ async def health_check():
     """Health check endpoint."""
     try:
         test_client = _create_es_client()
-        # Perform a lightweight check
         test_client.ping()
         return JSONResponse(content={"status": "healthy"})
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        return JSONResponse(
-            status_code=503, content={"status": "unhealthy", "reason": str(e)}
-        )
+        return JSONResponse(status_code=503, content={"status": "unhealthy", "reason": str(e)})
 
 
 def run() -> None:
@@ -765,4 +737,3 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
-
