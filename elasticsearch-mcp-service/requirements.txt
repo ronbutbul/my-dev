@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pydantic
+# Use Elasticsearch Python client 8.x to be compatible with clusters that
+# only accept Accept/Content-Type headers for versions 7 or 8.
+elasticsearch>=8,<9
+
