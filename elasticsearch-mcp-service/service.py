@@ -174,7 +174,7 @@ async def handle_tools_list(request_id: Any) -> JSONResponse:
     tools = [
         {
             "name": "search",
-            "description": "Run a search query against an Elasticsearch index",
+            "description": "Run a search query against an Elasticsearch index or data stream. Data stream names (e.g. 'logs-nginx') can be used directly as the index value.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -288,7 +288,20 @@ async def handle_tools_list(request_id: Any) -> JSONResponse:
         },
         {
             "name": "list-indices",
-            "description": "List all indices in the cluster",
+            "description": "List all indices in the cluster. Use include_hidden=true to also show datastream backing indices (e.g. .ds-logs-*).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_hidden": {
+                        "type": "boolean",
+                        "description": "Include hidden indices such as datastream backing indices (default: false)",
+                    },
+                },
+            },
+        },
+        {
+            "name": "list-datastreams",
+            "description": "List all data streams in the cluster. Data streams are used for time-series data such as logs and metrics. Use the data stream name directly in the search tool as the index value.",
             "inputSchema": {"type": "object", "properties": {}},
         },
         {
@@ -463,9 +476,26 @@ async def execute_tool(
             return json.dumps(resp, default=str, indent=2)
 
         elif tool_name == "list-indices":
-            resp = client.indices.get_alias(index="*")
+            include_hidden = arguments.get("include_hidden", False)
+            expand_wildcards = "all" if include_hidden else "open"
+            resp = client.indices.get_alias(index="*", expand_wildcards=expand_wildcards)
             indices = sorted(resp.keys())
             return json.dumps({"indices": indices}, indent=2)
+
+        elif tool_name == "list-datastreams":
+            resp = client.indices.get_data_stream(name="*")
+            datastreams = []
+            for ds in resp.get("data_streams", []):
+                datastreams.append({
+                    "name": ds["name"],
+                    "status": ds.get("status"),
+                    "template": ds.get("template"),
+                    "generation": ds.get("generation"),
+                    "backing_indices": [
+                        idx["index_name"] for idx in ds.get("indices", [])
+                    ],
+                })
+            return json.dumps({"data_streams": datastreams}, indent=2)
 
         elif tool_name == "index-mappings":
             index = arguments["index"]
@@ -685,11 +715,20 @@ async def update_document_route(request: UpdateDocumentRequest):
 
 
 @app.post("/tools/list-indices", tags=["Elasticsearch Tools"])
-async def list_indices_route():
-    """List all indices in the cluster."""
+async def list_indices_route(include_hidden: bool = False):
+    """List all indices in the cluster. Set include_hidden=true to include datastream backing indices."""
     session_id = _get_default_session()
     client = _get_es_client(session_id)
-    result = await execute_tool("list-indices", {}, client, session_id)
+    result = await execute_tool("list-indices", {"include_hidden": include_hidden}, client, session_id)
+    return JSONResponse(content=json.loads(result))
+
+
+@app.post("/tools/list-datastreams", tags=["Elasticsearch Tools"])
+async def list_datastreams_route():
+    """List all data streams in the cluster."""
+    session_id = _get_default_session()
+    client = _get_es_client(session_id)
+    result = await execute_tool("list-datastreams", {}, client, session_id)
     return JSONResponse(content=json.loads(result))
 
 
