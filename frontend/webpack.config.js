@@ -32,7 +32,16 @@ module.exports = {
       directory: path.join(__dirname, "public")
     },
     historyApiFallback: true,
-    port: 3000
+    port: 3000,
+    proxy: [
+      {
+        context: ["/api/statistic"],
+        target: process.env.STATS_API_URL || "https://statistics.testmpr.aws2.rafael.co.il",
+        pathRewrite: { "^/api": "" },
+        changeOrigin: true,
+        secure: false
+      }
+    ]
   }
 };
 
