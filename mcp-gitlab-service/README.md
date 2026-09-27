@@ -1,6 +1,6 @@
 # GitLab MCP Server
 
-An MCP (Model Context Protocol) server for GitLab operations, implementing the JSON-RPC 2.0 protocol for use with kagent.
+An MCP (Model Contextt Protocol) server for GitLab operations, implementing the JSON-RPC 2.0 protocol for use with kagent.
 It talks to the GitLab REST API v4 and works with both gitlab.com and self-managed GitLab instances.
 
 ## Features
