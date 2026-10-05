@@ -7,6 +7,11 @@ on:
     paths:
       - 'elasticsearch-mcp-service/**'
       - '.github/workflows/elasticsearch-mcp.yml'
+      - '.github/scripts/trivy-report.sh'
+
+permissions:
+  contents: read
+  security-events: write
 
 env:
   SERVICE_NAME: elasticsearch-mcp-service
@@ -37,7 +42,37 @@ jobs:
           python -m py_compile service.py config.py
 
       # Pinned to commit SHA (v0.36.0): trivy-action tags were hijacked in a supply-chain attack.
-      - name: Trivy filesystem scan (dependencies and secrets)
+      - name: Trivy filesystem scan (full report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: fs
+          scan-ref: ./elasticsearch-mcp-service
+          scanners: vuln,secret
+          format: json
+          output: trivy-fs.json
+          exit-code: '0'
+
+      - name: Generate filesystem scan reports
+        if: ${{ !cancelled() && hashFiles('trivy-fs.json') != '' }}
+        run: |
+          bash .github/scripts/trivy-report.sh trivy-fs.json "Trivy filesystem scan: ${SERVICE_NAME}"
+
+      - name: Upload filesystem scan reports
+        if: ${{ !cancelled() && hashFiles('trivy-fs.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-report-${{ github.run_number }}
+          path: trivy-fs.*
+          retention-days: 30
+
+      - name: Upload filesystem scan to GitHub Security tab
+        if: ${{ !cancelled() && hashFiles('trivy-fs.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs-${{ env.SERVICE_NAME }}
+
+      - name: Trivy filesystem gate (fail on fixable CRITICAL/HIGH)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           scan-type: fs
@@ -47,6 +82,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
           format: table
+          skip-setup-trivy: true
 
   build-and-deploy:
     needs: test
@@ -83,7 +119,40 @@ jobs:
             ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
           cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
 
-      - name: Trivy image scan
+      - name: Trivy image scan (full report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: trivy-image.json
+          exit-code: '0'
+
+      - name: Generate image scan reports
+        if: ${{ !cancelled() && hashFiles('trivy-image.json') != '' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          bash .github/scripts/trivy-report.sh trivy-image.json "Trivy image scan: ${SERVICE_NAME}:${VERSION}"
+
+      - name: Upload image scan reports
+        if: ${{ !cancelled() && hashFiles('trivy-image.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-report-${{ steps.version.outputs.version }}
+          path: trivy-image.*
+          retention-days: 30
+
+      - name: Upload image scan to GitHub Security tab
+        if: ${{ !cancelled() && hashFiles('trivy-image.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image-${{ env.SERVICE_NAME }}
+
+      - name: Trivy image gate (fail on fixable CRITICAL/HIGH)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           scan-type: image
@@ -94,6 +163,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
           format: table
+          skip-setup-trivy: true
 
       - name: Push Docker image
         uses: docker/build-push-action@v5
