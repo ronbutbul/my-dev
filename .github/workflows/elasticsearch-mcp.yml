@@ -113,6 +113,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./elasticsearch-mcp-service
+          pull: true
           load: true
           push: false
           tags: |
@@ -169,6 +170,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./elasticsearch-mcp-service
+          pull: true
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
