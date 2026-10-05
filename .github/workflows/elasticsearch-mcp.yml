@@ -1,4 +1,4 @@
-name: Build and Deploy Archive Service
+name: Build and Deploy Elasticsearch MCP Service
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'elasticsearch-mcp-service/**'
+      - '.github/workflows/elasticsearch-mcp.yml'
 
 env:
   SERVICE_NAME: elasticsearch-mcp-service
@@ -35,6 +36,18 @@ jobs:
         run: |
           python -m py_compile service.py config.py
 
+      # Pinned to commit SHA (v0.36.0): trivy-action tags were hijacked in a supply-chain attack.
+      - name: Trivy filesystem scan (dependencies and secrets)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: fs
+          scan-ref: ./elasticsearch-mcp-service
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
   build-and-deploy:
     needs: test
     runs-on: ubuntu-latest
@@ -60,7 +73,29 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
-      - name: Build and push Docker image
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: ./elasticsearch-mcp-service
+          load: true
+          push: false
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+      - name: Push Docker image
         uses: docker/build-push-action@v5
         with:
           context: ./elasticsearch-mcp-service
@@ -69,6 +104,3 @@ jobs:
             ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
           cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
-
-
-
